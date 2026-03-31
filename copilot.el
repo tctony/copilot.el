@@ -41,6 +41,8 @@
 (require 'json)
 (require 'jsonrpc)
 (require 'subr-x)
+(require 'auth-source)
+(require 'url-parse)
 
 (require 'editorconfig)
 (require 'track-changes)
@@ -159,34 +161,132 @@ Set to nil to use completions from the server verbatim."
   :group 'copilot
   :package-version '(copilot . "0.1"))
 
-(defconst copilot-server-package-name "@github/copilot-language-server"
-  "The name of the package to install copilot server.")
-
-(defcustom copilot-install-dir (expand-file-name
-                                (locate-user-emacs-file (file-name-concat ".cache" "copilot")))
-  "Directory in which the servers will be installed."
-  :risky t
-  :type 'directory
-  :group 'copilot
-  :package-version '(copilot . "0.1"))
-
-(defcustom copilot-server-executable "copilot-language-server"
-  "The executable of copilot server."
+(defcustom copilot-llm-ls-executable "llm-ls"
+  "Path to the llm-ls server executable."
   :type 'string
   :group 'copilot
-  :package-version '(copilot . "0.1"))
+  :package-version '(copilot . "0.5"))
 
-(defcustom copilot-lsp-server-version nil
-  "Copilot LSP server version.
-
-The default value is the preferred version and ensures functionality.
-You may adjust this variable at your own risk."
-  :type '(choice (const :tag "Latest" nil)
-                 (string :tag "Specific Version"))
+(defcustom copilot-backend "ollama"
+  "LLM backend type.
+Options: ollama, openai, huggingface, tgi, llamacpp, llm-crate."
+  :type 'string
   :group 'copilot
-  :package-version '(copilot . "0.1"))
+  :package-version '(copilot . "0.5"))
 
-(define-obsolete-variable-alias 'copilot-version 'copilot-lsp-server-version "0.4.0")
+(defcustom copilot-model "codestral:latest"
+  "Model name/identifier for the chosen backend."
+  :type 'string
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
+(defcustom copilot-backend-url "http://localhost:11434"
+  "Backend API URL."
+  :type 'string
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
+(defcustom copilot-provider nil
+  "Provider name when using llm-crate backend."
+  :type '(choice (const nil) string)
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
+(defcustom copilot-context-window 8192
+  "Context window size in tokens."
+  :type 'integer
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
+(defcustom copilot-request-body '(:max_new_tokens 128 :temperature 0.2)
+  "Generation parameters passed to the backend."
+  :type 'plist
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
+(defcustom copilot-fim-enabled t
+  "Whether to use fill-in-middle mode."
+  :type 'boolean
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
+(defcustom copilot-fim-prefix "<fim_prefix>"
+  "FIM prefix token."
+  :type 'string
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
+(defcustom copilot-fim-middle "<fim_middle>"
+  "FIM middle token."
+  :type 'string
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
+(defcustom copilot-fim-suffix "<fim_suffix>"
+  "FIM suffix token."
+  :type 'string
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
+(defcustom copilot-tokenizer-config nil
+  "Tokenizer configuration.
+Nil for default, or plist with :path, :repository, or :url."
+  :type '(choice (const nil) plist)
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
+(defcustom copilot-tokens-to-clear '("<|endoftext|>")
+  "Tokens to strip from completion output."
+  :type '(repeat string)
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
+(defvar copilot-model-presets
+  '((codestral-ollama
+     . (:backend "ollama"
+        :model "codestral:latest"
+        :url "http://localhost:11434"
+        :fim-enabled t
+        :fim-prefix "<fim_prefix>"
+        :fim-middle "<fim_middle>"
+        :fim-suffix "<fim_suffix>"
+        :context-window 32768
+        :request-body (:max_new_tokens 128 :temperature 0.2)))
+    (starcoder2-ollama
+     . (:backend "ollama"
+        :model "starcoder2:3b"
+        :url "http://localhost:11434"
+        :fim-enabled t
+        :fim-prefix "<fim_prefix>"
+        :fim-middle "<fim_middle>"
+        :fim-suffix "<fim_suffix>"
+        :context-window 16384
+        :request-body (:max_new_tokens 128 :temperature 0.2)))
+    (deepseek-coder
+     . (:backend "openai"
+        :model "deepseek-coder"
+        :url "https://api.deepseek.com"
+        :fim-enabled t
+        :fim-prefix "<｜fim▁begin｜>"
+        :fim-middle "<｜fim▁hole｜>"
+        :fim-suffix "<｜fim▁end｜>"
+        :context-window 16384
+        :request-body (:max_new_tokens 128 :temperature 0.2)))
+    (claude-sonnet
+     . (:backend "llm-crate"
+        :provider "anthropic"
+        :model "claude-sonnet-4-20250514"
+        :fim-enabled nil
+        :context-window 8192
+        :request-body (:max_new_tokens 256 :temperature 0.3)))
+    (gemini-pro
+     . (:backend "llm-crate"
+        :provider "google"
+        :model "gemini-2.5-pro"
+        :fim-enabled nil
+        :context-window 8192
+        :request-body (:max_new_tokens 256 :temperature 0.3))))
+  "Alist of model presets for quick configuration.")
 
 (defun copilot--lsp-settings-changed (symbol value)
   "Notify the Copilot LSP that SYMBOL changed to VALUE.
@@ -201,37 +301,22 @@ will not be called."
                        `(:settings ,(copilot--effective-lsp-settings))))))
 
 (defcustom copilot-lsp-settings nil
-  "Settings for the Copilot LSP server.
+  "Settings for the llm-ls LSP server.
 
 This value will always be sent to the server when the server starts or the value
-changes.  See
-https://github.com/github/copilot-language-server-release?tab=readme-ov-file#configuration-management
-for complete documentation.
+changes.
 
 To change the value of this variable, the customization framework provided by
 Emacs must be used.  Either use `setopt' or `customize' to change the value.  If
 the value was set without the customization mechanism, then the LSP has to be
 manually restarted with `copilot-diagnose'.  Otherwise, the change will not be
-applied.
-
-For example to use GitHub Enterprise use the following configuration:
- '(:github-enterprise (:uri \"https://example.ghe.com\"))
-
-Exchange the URI with the correct URI of your organization."
+applied."
   :set #'copilot--lsp-settings-changed
   :type 'sexp
   :group 'copilot
   :package-version '(copilot . "0.2"))
 
-(defcustom copilot-completion-model nil
-  "The completion model to use for Copilot suggestions.
-When nil, the server's default model is used.
-Use `M-x copilot-select-completion-model' to interactively choose
-from available models."
-  :type '(choice (const :tag "Default" nil)
-                 (string :tag "Model ID"))
-  :group 'copilot
-  :package-version '(copilot . "0.4"))
+;; copilot-completion-model removed — replaced by copilot-model defcustom
 
 (defvar-local copilot--overlay nil
   "Overlay for Copilot completion.")
@@ -357,40 +442,21 @@ recently updated session."
 ;;
 
 (defun copilot-installed-version ()
-  "Return the version number of currently installed `copilot-server-package-name'."
-  (let ((possible-paths (list
-                         (when (eq system-type 'windows-nt)
-                           (file-name-concat copilot-install-dir "node_modules" copilot-server-package-name "package.json"))
-                         (file-name-concat copilot-install-dir "lib" "node_modules" copilot-server-package-name "package.json")
-                         (file-name-concat copilot-install-dir "lib64" "node_modules" copilot-server-package-name "package.json"))))
-    (seq-some
-     (lambda (path)
-       (when (and path (file-exists-p path))
-         (with-temp-buffer
-           (insert-file-contents path)
-           (save-match-data
-             (when (re-search-forward "\"version\": \"\\([0-9]+\\.[0-9]+\\.[0-9]+\\)\"" nil t)
-               (match-string 1))))))
-     possible-paths)))
+  "Return llm-ls version string when available."
+  (when-let* ((exe (ignore-errors (copilot-server-executable)))
+              (version-output (with-temp-buffer
+                                (when (zerop (call-process exe nil t nil "--version"))
+                                  (buffer-string)))))
+    (string-trim version-output)))
 
 (defun copilot-server-executable ()
-  "Return the location of the `copilot-server-executable' file."
+  "Return the location of the configured llm-ls executable."
   (cond
-   ((and (file-name-absolute-p copilot-server-executable)
-         (file-exists-p copilot-server-executable))
-    copilot-server-executable)
-   ((executable-find copilot-server-executable t))
-   (t
-    (let ((path (executable-find
-                 (file-name-concat copilot-install-dir
-                                   (cond ((eq system-type 'windows-nt) "")
-                                         (t "bin"))
-                                   copilot-server-executable)
-                 t)))
-      (unless (and path (file-exists-p path))
-        (error "The package %s is not installed.  Unable to find %s"
-               copilot-server-package-name path))
-      path))))
+   ((and (file-name-absolute-p copilot-llm-ls-executable)
+         (file-exists-p copilot-llm-ls-executable))
+    copilot-llm-ls-executable)
+   ((executable-find copilot-llm-ls-executable t))
+   (t (error "Unable to find llm-ls executable: %s" copilot-llm-ls-executable))))
 
 ;; XXX: This function is modified from `lsp-mode'; see `lsp-async-start-process'
 ;; function for more information.
@@ -421,35 +487,21 @@ recently updated session."
 
 ;;;###autoload
 (defun copilot-install-server ()
-  "Interactively install server."
+  "Deprecated installer entrypoint retained for compatibility."
   (interactive)
-  (if-let* ((npm-binary (executable-find "npm")))
-      (progn
-        (make-directory copilot-install-dir 'parents)
-        (copilot-async-start-process
-         nil nil
-         npm-binary
-         "-g" "--prefix" copilot-install-dir
-         "install" (concat copilot-server-package-name
-                           (when copilot-lsp-server-version (format "@%s" copilot-lsp-server-version)))))
-    (copilot--log 'warning "Unable to install %s via `npm' because it is not present" copilot-server-package-name)
-    nil))
+  (user-error "Server installation is no longer managed by copilot.el; install llm-ls and set `copilot-llm-ls-executable`"))
 
 ;;;###autoload
 (defun copilot-uninstall-server ()
-  "Delete a Copilot server from `copilot-install-dir'."
+  "Deprecated uninstaller entrypoint retained for compatibility."
   (interactive)
-  (unless (file-directory-p copilot-install-dir)
-    (user-error "Couldn't find %s directory" copilot-install-dir))
-  (delete-directory copilot-install-dir 'recursive)
-  (copilot--log 'warning "Server `%s' uninstalled." (file-name-nondirectory (directory-file-name copilot-install-dir))))
+  (user-error "Server uninstall is no longer managed by copilot.el"))
 
 ;;;###autoload
 (defun copilot-reinstall-server ()
-  "Interactively re-install server."
+  "Deprecated reinstaller entrypoint retained for compatibility."
   (interactive)
-  (copilot-uninstall-server)
-  (copilot-install-server))
+  (user-error "Server reinstall is no longer managed by copilot.el"))
 
 ;;
 ;; Interaction with Copilot Server
@@ -562,27 +614,15 @@ there is no active connection."
        (funcall make-fn :events-buffer-scrollback-size copilot-log-max)))))
 
 (defun copilot--effective-lsp-settings ()
-  "Return the effective LSP settings, including completion model."
-  (let ((settings (copy-sequence copilot-lsp-settings)))
-    (when copilot-completion-model
-      (let* ((github (or (plist-get settings :github) '()))
-             (copilot-section (or (plist-get github :copilot) '())))
-        (setq copilot-section (plist-put copilot-section :selectedCompletionModel copilot-completion-model))
-        (setq github (plist-put github :copilot copilot-section))
-        (setq settings (plist-put settings :github github))))
-    settings))
+  "Return the effective LSP settings."
+  (or copilot-lsp-settings '()))
 
 (defun copilot--start-server ()
   "Start the copilot server process in local."
   (cond
-   ((not (file-exists-p (copilot-server-executable)))
-    (user-error "Server is not installed, please install via `M-x copilot-install-server`"))
+   ((not (copilot-server-executable))
+    (user-error "Unable to start llm-ls, configure `copilot-llm-ls-executable`"))
    (t
-    (let ((installed-version (copilot-installed-version)))
-      (when (and copilot-lsp-server-version (not (equal installed-version copilot-lsp-server-version)))
-        (warn "This package has been tested for Copilot LSP server version %s but version %s has been detected.
-You can change the installed version with `M-x copilot-reinstall-server` or remove this warning by changing the value of `copilot-lsp-server-version'."
-              copilot-lsp-server-version installed-version)))
     (setq copilot--connection (copilot--make-connection))
     (setq copilot--workspace-folders nil)
     (copilot--log 'info "Copilot server started.")
@@ -607,9 +647,7 @@ You can change the installed version with `M-x copilot-reinstall-server` or remo
          (:editorInfo
           (:name "Emacs" :version ,emacs-version)
           :editorPluginInfo
-          (:name "copilot.el" :version ,(or (package-get-version) "unknown"))
-          ,@(when copilot-network-proxy
-              `(:networkProxy ,copilot-network-proxy))))))
+          (:name "copilot.el" :version ,(or (package-get-version) "unknown"))))))
     (copilot--notify 'initialized '())
     (copilot--notify 'workspace/didChangeConfiguration `(:settings ,(copilot--effective-lsp-settings)))
     (add-hook 'kill-emacs-hook #'copilot--shutdown-server))))
@@ -618,37 +656,45 @@ You can change the installed version with `M-x copilot-reinstall-server` or remo
 ;; login / logout
 ;;
 
+(defun copilot-select-preset (name)
+  "Apply model preset NAME."
+  (interactive
+   (list (intern (completing-read "Preset: " (mapcar #'car copilot-model-presets)))))
+  (let ((preset (alist-get name copilot-model-presets)))
+    (unless preset
+      (user-error "Unknown preset: %s" name))
+    (setq copilot-backend (plist-get preset :backend)
+          copilot-model (plist-get preset :model)
+          copilot-backend-url (or (plist-get preset :url) copilot-backend-url)
+          copilot-provider (plist-get preset :provider)
+          copilot-fim-enabled (plist-get preset :fim-enabled)
+          copilot-fim-prefix (or (plist-get preset :fim-prefix) copilot-fim-prefix)
+          copilot-fim-middle (or (plist-get preset :fim-middle) copilot-fim-middle)
+          copilot-fim-suffix (or (plist-get preset :fim-suffix) copilot-fim-suffix)
+          copilot-context-window (or (plist-get preset :context-window) copilot-context-window)
+          copilot-request-body (or (plist-get preset :request-body) copilot-request-body))
+    (message "Copilot preset applied: %s (model: %s, backend: %s)"
+             name copilot-model copilot-backend)))
+
+(defun copilot--provider-host ()
+  "Return auth-source host for the current backend."
+  (pcase copilot-backend
+    ("llm-crate" copilot-provider)
+    (_ (url-host (url-generic-parse-url copilot-backend-url)))))
+
+(defun copilot--get-api-key ()
+  "Retrieve API key from auth-source for the active provider."
+  (auth-source-pick-first-password :host (copilot--provider-host)))
+
 (defun copilot-login ()
-  "Login to Copilot."
+  "Deprecated login command retained for compatibility."
   (interactive)
-  (copilot--dbind
-      (status user ((:userCode user-code)) ((:verificationUri verification-uri)))
-      (copilot--request 'signInInitiate nil)
-    (when (string-equal status "AlreadySignedIn")
-      (user-error "Already signed in as %s" user))
-    (if (display-graphic-p)
-        (progn
-          (gui-set-selection 'CLIPBOARD user-code)
-          (read-from-minibuffer (format "Your one-time code %s is copied. Press \
-ENTER to open GitHub in your browser. If your browser does not open \
-automatically, browse to %s." user-code verification-uri))
-          (browse-url verification-uri)
-          (read-from-minibuffer "Press ENTER if you finish authorizing."))
-      (read-from-minibuffer (format "First copy your one-time code: %s. Press ENTER to continue." user-code))
-      (read-from-minibuffer (format "Please open %s in your browser. Press ENTER if you finish authorizing." verification-uri)))
-    (copilot--log 'info "Verifying...")
-    (condition-case err
-        (copilot--request 'signInConfirm (list :userCode user-code))
-      (jsonrpc-error
-       (user-error "Authentication failure: %s" (alist-get 'jsonrpc-error-message (cddr err)))))
-    (copilot--dbind (user) (copilot--request 'checkStatus nil)
-      (copilot--log 'info "Authenticated as GitHub user %s." user))))
+  (user-error "GitHub device login is removed; configure API credentials via auth-source"))
 
 (defun copilot-logout ()
-  "Logout from Copilot."
+  "Deprecated logout command retained for compatibility."
   (interactive)
-  (copilot--request 'signOut nil)
-  (copilot--log 'warning "Logged out."))
+  (user-error "GitHub device logout is removed; manage credentials via auth-source"))
 
 ;;
 ;; diagnose
@@ -657,7 +703,7 @@ automatically, browse to %s." user-code verification-uri))
 (defun copilot-diagnose ()
   "Restart the Copilot server and send a test completion request.
 Shuts down any running server, starts a fresh one, and fires a
-`textDocument/inlineCompletion' request for the current buffer.
+`llm-ls/getCompletions' request for the current buffer.
 The result is logged to *Messages*: look for \"Copilot: Copilot OK.\"
 on success, or an error/timeout message on failure."
   (interactive)
@@ -669,10 +715,8 @@ on success, or an error/timeout message on failure."
   (if copilot-mode
       (copilot--on-doc-focus (selected-window))
     (copilot-mode))
-  (copilot--async-request 'textDocument/inlineCompletion
-                          (list :textDocument (list :uri (copilot--get-uri))
-                                :position '(:line 0 :character 0)
-                                :context '(:triggerKind 1))
+  (copilot--async-request 'llm-ls/getCompletions
+                          (copilot--inline-completion-params 1)
                           :success-fn (lambda (_)
                                         (copilot--log 'info "Copilot OK."))
                           :timeout-fn (lambda ()
@@ -683,29 +727,9 @@ on success, or an error/timeout message on failure."
 ;;
 
 (defun copilot-select-completion-model ()
-  "Interactively select a Copilot completion model."
+  "Deprecated model selector — use `copilot-select-preset' instead."
   (interactive)
-  (let* ((models (copilot--request 'copilot/models nil))
-         (completion-models
-          (seq-filter (lambda (m)
-                        (seq-contains-p (plist-get m :scopes) "completion"))
-                      models))
-         (choices (mapcar (lambda (m)
-                            (cons (format "%s (%s)" (plist-get m :modelName) (plist-get m :id))
-                                  (plist-get m :id)))
-                          completion-models)))
-    (if (= (length choices) 1)
-        (let ((model-id (cdar choices)))
-          (setq copilot-completion-model model-id)
-          (copilot--notify 'workspace/didChangeConfiguration
-                           `(:settings ,(copilot--effective-lsp-settings)))
-          (message "Only one completion model available: %s" model-id))
-      (let* ((choice (completing-read "Completion model: " choices nil t))
-             (model-id (cdr (assoc choice choices))))
-        (setq copilot-completion-model model-id)
-        (copilot--notify 'workspace/didChangeConfiguration
-                         `(:settings ,(copilot--effective-lsp-settings)))
-        (copilot--log 'info "Completion model set to %s" model-id)))))
+  (call-interactively #'copilot-select-preset))
 
 ;;
 ;; Auto completion
@@ -943,20 +967,54 @@ POS defaults to point.  Character offset is in UTF-16 code units."
             :position (copilot--lsp-pos)))))
 
 (defun copilot--inline-completion-params (trigger-kind)
-  "Build parameters for textDocument/inlineCompletion.
+  "Build parameters for llm-ls/getCompletions.
 TRIGGER-KIND is 1 for manual invocation, 2 for automatic."
   (save-restriction
     (widen)
-    (list :textDocument (list :uri (copilot--get-uri))
-          :position (copilot--lsp-pos)
-          :context (list :triggerKind trigger-kind)
-          :formattingOptions (list :tabSize (copilot--infer-indentation-offset)
-                                   :insertSpaces (if indent-tabs-mode :json-false t)))))
+    (let ((position (copilot--lsp-pos)))
+      (list :textDocument (list :uri (copilot--get-uri))
+            :position position
+            :model copilot-model
+            :backend copilot-backend
+            :url copilot-backend-url
+            :provider copilot-provider
+            :apiToken (copilot--get-api-key)
+            :contextWindow copilot-context-window
+            :fim (list :enabled copilot-fim-enabled
+                       :prefix copilot-fim-prefix
+                       :middle copilot-fim-middle
+                       :suffix copilot-fim-suffix)
+            :tokenizerConfig copilot-tokenizer-config
+            :requestBody copilot-request-body
+            :tokensToClear copilot-tokens-to-clear
+            :ide "emacs"
+            :triggerKind trigger-kind
+            :tlsSkipVerifyInsecure :json-false
+            :disableUrlPathCompletion :json-false))))
+
+(defun copilot--normalize-llm-ls-response (response)
+  "Normalize RESPONSE from llm-ls/getCompletions to internal completion items."
+  (let* ((request-id (plist-get response :requestId))
+         (position (copilot--lsp-pos))
+         (line (plist-get position :line))
+         (character (plist-get position :character)))
+    (mapcar
+     (lambda (completion)
+       (let* ((generated-text (or (plist-get completion :generatedText) ""))
+              (end-character (+ character (copilot--utf16-strlen generated-text))))
+         (list :uuid request-id
+               :text generated-text
+               :range (list :start (list :line line :character character)
+                            :end (list :line line :character end-character))
+               :insertText generated-text)))
+     (append (plist-get response :completions) nil))))
 
 (defun copilot--normalize-completion-response (response)
-  "Normalize RESPONSE from textDocument/inlineCompletion to a list of items."
+  "Normalize completion RESPONSE to a list of items."
   (cond
    ((null response) nil)
+   ((plist-get response :completions)
+    (copilot--normalize-llm-ls-response response))
    ((vectorp response) (append response nil))
    ((plist-get response :items)
     (append (plist-get response :items) nil))
@@ -967,12 +1025,12 @@ TRIGGER-KIND is 1 for manual invocation, 2 for automatic."
 TRIGGER-KIND is 1 for invoked, 2 for automatic (default)."
   (copilot--cancel-completion)
   (setq copilot--completion-request-id
-        (copilot--async-request 'textDocument/inlineCompletion
+        (copilot--async-request 'llm-ls/getCompletions
                                 (copilot--inline-completion-params (or trigger-kind 2))
                                 :success-fn callback
                                 :error-fn (lambda (err)
                                             (unless (= (plist-get err :code) -32800) ; Request canceled
-                                              (copilot--log 'error "textDocument/inlineCompletion failed: %S"
+                                              (copilot--log 'error "llm-ls/getCompletions failed: %S"
                                                             err))))))
 
 (defun copilot--cycle-completion (direction)
@@ -1049,34 +1107,8 @@ Each request METHOD can have only one HANDLER."
                                      (2 'warning)
                                      (1 'error)))))))))
 
-(copilot-on-notification
- 'PanelSolution
- (lambda (msg)
-   (copilot--dbind (((:completionText completion-text)) ((:score completion-score))) msg
-     (with-current-buffer "*copilot-panel*"
-       (unless (member (secure-hash 'sha256 completion-text)
-                       (org-map-entries (lambda () (org-entry-get nil "SHA"))))
-         (save-excursion
-           (goto-char (point-max))
-           (insert "* Solution\n"
-                   "  :PROPERTIES:\n"
-                   "  :SCORE: " (number-to-string completion-score) "\n"
-                   "  :SHA: " (secure-hash 'sha256 completion-text) "\n"
-                   "  :END:\n"
-                   "#+BEGIN_SRC " copilot--panel-lang "\n"
-                   completion-text "\n#+END_SRC\n\n")
-           (goto-char (point-min))
-           (org-sort-entries nil ?R nil nil "SCORE")))))))
-
-(copilot-on-notification
- 'PanelSolutionsDone
- (lambda (_msg)
-   (copilot--log 'info "Finished synthesizing solutions.")
-   (display-buffer "*copilot-panel*")
-   (with-current-buffer "*copilot-panel*"
-     (save-excursion
-       (goto-char (point-max))
-       (insert "End of solutions.\n")))))
+;; PanelSolution/PanelSolutionsDone notifications removed — panel now uses
+;; llm-ls/getCompletions response directly in copilot-panel-complete.
 
 (copilot-on-notification
  'didChangeStatus
@@ -1145,28 +1177,37 @@ Each request METHOD can have only one HANDLER."
        (force-mode-line-update t)))))
 
 (defun copilot--get-panel-completions (callback)
-  "Get panel completions with CALLBACK."
-  (copilot--async-request 'getPanelCompletions
-                          (list :doc (copilot--generate-doc)
-                                :panelId (generate-new-buffer-name "copilot-panel"))
+  "Get panel completions with CALLBACK via llm-ls/getCompletions."
+  (copilot--async-request 'llm-ls/getCompletions
+                          (copilot--inline-completion-params 1)
                           :success-fn callback
                           :timeout-fn (lambda ()
                                         (copilot--log 'warning "Copilot server timeout."))))
 
 
 (defun copilot-panel-complete ()
-  "Pop a buffer with a list of suggested completions based on the current file ."
+  "Pop a buffer with a list of suggested completions based on the current file."
   (interactive)
   (require 'org)
   (setq copilot--last-doc-version copilot--doc-version)
   (setq copilot--panel-lang (copilot--get-language-id))
 
   (copilot--get-panel-completions
-   (jsonrpc-lambda (&key solutionCountTarget)
-     (copilot--log 'info "Synthesizing %d solutions..." solutionCountTarget)))
-  (with-current-buffer (get-buffer-create "*copilot-panel*")
-    (org-mode)
-    (erase-buffer)))
+   (lambda (response)
+     (let ((completions (copilot--normalize-completion-response response)))
+       (with-current-buffer (get-buffer-create "*copilot-panel*")
+         (erase-buffer)
+         (org-mode)
+         (dolist (item completions)
+           (let ((text (or (plist-get item :text)
+                           (plist-get item :insertText) "")))
+             (unless (string-blank-p text)
+               (insert "* Solution\n"
+                       "#+BEGIN_SRC " copilot--panel-lang "\n"
+                       text "\n#+END_SRC\n\n"))))
+         (goto-char (point-min))
+         (copilot--log 'info "Panel: %d completions." (length completions))
+         (display-buffer (current-buffer)))))))
 
 ;;
 ;; UI
@@ -1258,10 +1299,7 @@ already saving an excursion.  This is also a private function."
       (copilot--set-overlay-text ov completion)
       (overlay-put ov 'command command)
       (overlay-put ov 'full-insert-text full-insert-text)
-      (overlay-put ov 'completion-start start)
-      (when command
-        (copilot--notify 'textDocument/didShowCompletion
-                         (list :item (list :command command)))))))
+      (overlay-put ov 'completion-start start))))
 
 (defun copilot-clear-overlay (&optional _is-accepted)
   "Clear Copilot overlay."
@@ -1297,18 +1335,6 @@ provided."
         (delete-region completion-start (point)))
       (let ((is-partial (and (string-prefix-p t-completion completion)
                              (not (string-equal t-completion completion)))))
-        (if is-partial
-            ;; Partial acceptance
-            (when command
-              (let* ((prefix-len (- (length full-insert-text) (length completion)))
-                     (accepted-length (+ prefix-len (length t-completion))))
-                (copilot--notify 'textDocument/didPartiallyAcceptCompletion
-                                 (list :item (list :command command)
-                                       :acceptedLength accepted-length))))
-          ;; Full acceptance
-          (when command
-            (copilot--async-request 'workspace/executeCommand
-                                    command)))
         (copilot-clear-overlay t)
         (if (derived-mode-p 'vterm-mode)
             (progn
@@ -1668,20 +1694,8 @@ Use this for custom bindings in `copilot-mode'.")
     ["Previous Completion" copilot-previous-completion]
     ["Panel Complete" copilot-panel-complete]
     "--"
-    ["Chat" copilot-chat]
-    ["Chat Send Region" copilot-chat-send-region]
-    ["Chat Reset" copilot-chat-reset]
+    ["Select Preset" copilot-select-preset]
     "--"
-    ["Toggle NES Mode" copilot-nes-mode]
-    "--"
-    ["Select Completion Model" copilot-select-completion-model]
-    ["Select Chat Model" copilot-chat-select-model]
-    ["Login" copilot-login]
-    ["Logout" copilot-logout]
-    "--"
-    ["Install Server" copilot-install-server]
-    ["Reinstall Server" copilot-reinstall-server]
-    ["Uninstall Server" copilot-uninstall-server]
     ["Diagnose" copilot-diagnose]))
 
 (defun copilot--mode-setup ()
