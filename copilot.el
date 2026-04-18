@@ -174,7 +174,7 @@ Options: ollama, openai, huggingface, tgi, llamacpp, llm-crate."
   :group 'copilot
   :package-version '(copilot . "0.5"))
 
-(defcustom copilot-model "codestral:latest"
+(defcustom copilot-model "qwen2.5-coder:7b"
   "Model name/identifier for the chosen backend."
   :type 'string
   :group 'copilot
@@ -192,13 +192,23 @@ Options: ollama, openai, huggingface, tgi, llamacpp, llm-crate."
   :group 'copilot
   :package-version '(copilot . "0.5"))
 
-(defcustom copilot-context-window 8192
+(defcustom copilot-context-window 32768
   "Context window size in tokens."
   :type 'integer
   :group 'copilot
   :package-version '(copilot . "0.5"))
 
-(defcustom copilot-request-body '(:max_new_tokens 128 :temperature 0.2)
+(defcustom copilot-request-body '(:raw t
+                                       :options (:temperature 0.2
+                                                              :top_p 0.2
+                                                              :num_predict 256
+                                                              :stop ["<|endoftext|>"
+                                                                     "<|fim_prefix|>"
+                                                                     "<|fim_middle|>"
+                                                                     "<|fim_suffix|>"
+                                                                     "<|fim_pad|>"
+                                                                     "<|im_start|>"
+                                                                     "<|im_end|>"]))
   "Generation parameters passed to the backend."
   :type 'plist
   :group 'copilot
@@ -210,19 +220,19 @@ Options: ollama, openai, huggingface, tgi, llamacpp, llm-crate."
   :group 'copilot
   :package-version '(copilot . "0.5"))
 
-(defcustom copilot-fim-prefix "<fim_prefix>"
+(defcustom copilot-fim-prefix "<|fim_prefix|>"
   "FIM prefix token."
   :type 'string
   :group 'copilot
   :package-version '(copilot . "0.5"))
 
-(defcustom copilot-fim-middle "<fim_middle>"
+(defcustom copilot-fim-middle "<|fim_middle|>"
   "FIM middle token."
   :type 'string
   :group 'copilot
   :package-version '(copilot . "0.5"))
 
-(defcustom copilot-fim-suffix "<fim_suffix>"
+(defcustom copilot-fim-suffix "<|fim_suffix|>"
   "FIM suffix token."
   :type 'string
   :group 'copilot
@@ -235,58 +245,45 @@ Nil for default, or plist with :path, :repository, or :url."
   :group 'copilot
   :package-version '(copilot . "0.5"))
 
-(defcustom copilot-tokens-to-clear '("<|endoftext|>")
+(defcustom copilot-tokens-to-clear '("<|endoftext|>" "<|fim_pad|>")
   "Tokens to strip from completion output."
   :type '(repeat string)
   :group 'copilot
   :package-version '(copilot . "0.5"))
 
-(defvar copilot-model-presets
-  '((codestral-ollama
-     . (:backend "ollama"
-        :model "codestral:latest"
-        :url "http://localhost:11434"
-        :fim-enabled t
-        :fim-prefix "<fim_prefix>"
-        :fim-middle "<fim_middle>"
-        :fim-suffix "<fim_suffix>"
-        :context-window 32768
-        :request-body (:max_new_tokens 128 :temperature 0.2)))
-    (starcoder2-ollama
-     . (:backend "ollama"
-        :model "starcoder2:3b"
-        :url "http://localhost:11434"
-        :fim-enabled t
-        :fim-prefix "<fim_prefix>"
-        :fim-middle "<fim_middle>"
-        :fim-suffix "<fim_suffix>"
-        :context-window 16384
-        :request-body (:max_new_tokens 128 :temperature 0.2)))
-    (deepseek-coder
-     . (:backend "openai"
-        :model "deepseek-coder"
-        :url "https://api.deepseek.com"
-        :fim-enabled t
-        :fim-prefix "<｜fim▁begin｜>"
-        :fim-middle "<｜fim▁hole｜>"
-        :fim-suffix "<｜fim▁end｜>"
-        :context-window 16384
-        :request-body (:max_new_tokens 128 :temperature 0.2)))
-    (claude-sonnet
-     . (:backend "llm-crate"
-        :provider "anthropic"
-        :model "claude-sonnet-4-20250514"
-        :fim-enabled nil
-        :context-window 8192
-        :request-body (:max_new_tokens 256 :temperature 0.3)))
-    (gemini-pro
-     . (:backend "llm-crate"
-        :provider "google"
-        :model "gemini-2.5-pro"
-        :fim-enabled nil
-        :context-window 8192
-        :request-body (:max_new_tokens 256 :temperature 0.3))))
-  "Alist of model presets for quick configuration.")
+(setq copilot-model-presets
+      '(
+        (ollama-qwen2.5-coder
+         . (:backend "ollama"
+                     :model "qwen2.5-coder:7b"
+                     :url "http://localhost:11434"
+                     :fim-enabled t
+                     :fim-prefix "<|fim_prefix|>"
+                     :fim-middle "<|fim_middle|>"
+                     :fim-suffix "<|fim_suffix|>"
+                     :context-window 32768
+                     :tokens-to-clear ("<|endoftext|>" "<|fim_pad|>")
+                     :request-body (:raw t
+                                         :options (:temperature 0.2
+                                                                :top_p 0.2
+                                                                :num_predict 256
+                                                                :stop ["<|endoftext|>"
+                                                                       "<|fim_prefix|>"
+                                                                       "<|fim_middle|>"
+                                                                       "<|fim_suffix|>"
+                                                                       "<|fim_pad|>"
+                                                                       "<|im_start|>"
+                                                                       "<|im_end|>"]))))
+
+        (gemini-3.1-flash-lite-preview
+         . (:backend "llm-crate"
+                     :provider "google"
+                     :model "gemini-3.1-flash-lite-preview"
+                     :auth-source-host "llm.gemini"
+                     :fim-enabled nil
+                     :context-window 32768
+                     :request-body (:max_new_tokens 256 :temperature 0.3)))
+        ))
 
 (defun copilot--lsp-settings-changed (symbol value)
   "Notify the Copilot LSP that SYMBOL changed to VALUE.
@@ -533,10 +530,10 @@ reject the request with a schema-validation error."
      (jsonrpc-notify copilot--connection ,@args)))
 
 (cl-defmacro copilot--async-request (method params &rest args
-                                    &key
-                                    (success-fn #'copilot--ignore-response)
-                                    (error-fn nil error-fn-supplied-p)
-                                    &allow-other-keys)
+                                            &key
+                                            (success-fn #'copilot--ignore-response)
+                                            (error-fn nil error-fn-supplied-p)
+                                            &allow-other-keys)
   "Send an asynchronous request to the copilot server.
 
 Arguments METHOD, PARAMS and ARGS are used in function `jsonrpc-async-request'.
@@ -576,10 +573,10 @@ cleans up the connection and resets global state.  Safe to call when
 there is no active connection."
   (when copilot--connection
     (condition-case _err
-        (jsonrpc-request copilot--connection 'shutdown nil :timeout 3)
+        (jsonrpc-request copilot--connection 'shutdown (make-hash-table) :timeout 3)
       (error nil))
     (condition-case _err
-        (jsonrpc-notify copilot--connection 'exit nil)
+        (jsonrpc-notify copilot--connection 'exit (make-hash-table))
       (error nil))
     (jsonrpc-shutdown copilot--connection)
     (setq copilot--connection nil)
@@ -615,7 +612,7 @@ there is no active connection."
 
 (defun copilot--effective-lsp-settings ()
   "Return the effective LSP settings."
-  (or copilot-lsp-settings '()))
+  (or copilot-lsp-settings (make-hash-table)))
 
 (defun copilot--start-server ()
   "Start the copilot server process in local."
@@ -648,7 +645,7 @@ there is no active connection."
           (:name "Emacs" :version ,emacs-version)
           :editorPluginInfo
           (:name "copilot.el" :version ,(or (package-get-version) "unknown"))))))
-    (copilot--notify 'initialized '())
+    (copilot--notify 'initialized (make-hash-table))
     (copilot--notify 'workspace/didChangeConfiguration `(:settings ,(copilot--effective-lsp-settings)))
     (add-hook 'kill-emacs-hook #'copilot--shutdown-server))))
 
@@ -672,15 +669,25 @@ there is no active connection."
           copilot-fim-middle (or (plist-get preset :fim-middle) copilot-fim-middle)
           copilot-fim-suffix (or (plist-get preset :fim-suffix) copilot-fim-suffix)
           copilot-context-window (or (plist-get preset :context-window) copilot-context-window)
+          copilot-tokens-to-clear (or (plist-get preset :tokens-to-clear) copilot-tokens-to-clear)
+          copilot-auth-source-host (plist-get preset :auth-source-host)
           copilot-request-body (or (plist-get preset :request-body) copilot-request-body))
     (message "Copilot preset applied: %s (model: %s, backend: %s)"
              name copilot-model copilot-backend)))
 
+(defcustom copilot-auth-source-host nil
+  "Override auth-source host for API key lookup.
+When non-nil, used instead of the auto-derived host."
+  :type '(choice (const nil) string)
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
 (defun copilot--provider-host ()
   "Return auth-source host for the current backend."
-  (pcase copilot-backend
-    ("llm-crate" copilot-provider)
-    (_ (url-host (url-generic-parse-url copilot-backend-url)))))
+  (or copilot-auth-source-host
+      (pcase copilot-backend
+        ("llm-crate" copilot-provider)
+        (_ (url-host (url-generic-parse-url copilot-backend-url))))))
 
 (defun copilot--get-api-key ()
   "Retrieve API key from auth-source for the active provider."
@@ -971,36 +978,40 @@ POS defaults to point.  Character offset is in UTF-16 code units."
 TRIGGER-KIND is 1 for manual invocation, 2 for automatic."
   (save-restriction
     (widen)
-    (let ((position (copilot--lsp-pos)))
-      (list :textDocument (list :uri (copilot--get-uri))
-            :position position
-            :model copilot-model
-            :backend copilot-backend
-            :url copilot-backend-url
-            :provider copilot-provider
-            :apiToken (copilot--get-api-key)
-            :contextWindow copilot-context-window
-            :fim (list :enabled copilot-fim-enabled
-                       :prefix copilot-fim-prefix
-                       :middle copilot-fim-middle
-                       :suffix copilot-fim-suffix)
-            :tokenizerConfig copilot-tokenizer-config
-            :requestBody copilot-request-body
-            :tokensToClear copilot-tokens-to-clear
-            :ide "emacs"
-            :triggerKind trigger-kind
-            :tlsSkipVerifyInsecure :json-false
-            :disableUrlPathCompletion :json-false))))
+    (let ((position (copilot--lsp-pos))
+          (api-token (copilot--get-api-key)))
+      (append
+       (list :textDocument (list :uri (copilot--get-uri))
+             :position position
+             :model copilot-model
+             :backend copilot-backend
+             :url copilot-backend-url
+             :contextWindow copilot-context-window
+             :fim (list :enabled (if copilot-fim-enabled t :json-false)
+                        :prefix copilot-fim-prefix
+                        :middle copilot-fim-middle
+                        :suffix copilot-fim-suffix)
+             :requestBody copilot-request-body
+             :tokensToClear (vconcat copilot-tokens-to-clear)
+             :ide "emacs"
+             :triggerKind trigger-kind
+             :tlsSkipVerifyInsecure :json-false
+             :disableUrlPathCompletion :json-false)
+       (when copilot-provider (list :provider copilot-provider))
+       (when api-token (list :apiToken api-token))
+       (when copilot-tokenizer-config (list :tokenizerConfig copilot-tokenizer-config))))))
 
 (defun copilot--normalize-llm-ls-response (response)
   "Normalize RESPONSE from llm-ls/getCompletions to internal completion items."
-  (let* ((request-id (plist-get response :requestId))
+  (let* ((request-id (or (plist-get response :request_id)
+                         (plist-get response :requestId)))
          (position (copilot--lsp-pos))
          (line (plist-get position :line))
          (character (plist-get position :character)))
     (mapcar
      (lambda (completion)
-       (let* ((generated-text (or (plist-get completion :generatedText) ""))
+       (let* ((generated-text (or (plist-get completion :generated_text)
+                                  (plist-get completion :generatedText) ""))
               (end-character (+ character (copilot--utf16-strlen generated-text))))
          (list :uuid request-id
                :text generated-text
