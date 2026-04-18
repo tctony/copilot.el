@@ -1108,15 +1108,15 @@ Each request METHOD can have only one HANDLER."
  'window/logMessage
  (lambda (msg)
    (copilot--dbind (((:type log-level)) ((:message log-msg))) msg
-     (with-current-buffer (get-buffer-create "*copilot-language-server-log*")
-       (save-excursion
-         (goto-char (point-max))
-         (insert (propertize (concat log-msg "\n")
-                             'face (pcase log-level
-                                     (4 'shadow)
-                                     (3 'success)
-                                     (2 'warning)
-                                     (1 'error)))))))))
+                   (with-current-buffer (get-buffer-create "*copilot-language-server-log*")
+                     (save-excursion
+                       (goto-char (point-max))
+                       (insert (propertize (concat log-msg "\n")
+                                           'face (pcase log-level
+                                                   (4 'shadow)
+                                                   (3 'success)
+                                                   (2 'warning)
+                                                   (1 'error)))))))))
 
 ;; PanelSolution/PanelSolutionsDone notifications removed — panel now uses
 ;; llm-ls/getCompletions response directly in copilot-panel-complete.
@@ -1125,67 +1125,67 @@ Each request METHOD can have only one HANDLER."
  'didChangeStatus
  (lambda (msg)
    (copilot--dbind (kind busy message) msg
-     (setq copilot--status (list :kind kind :busy (eq busy t) :message message))
-     (force-mode-line-update t))))
+                   (setq copilot--status (list :kind kind :busy (eq busy t) :message message))
+                   (force-mode-line-update t))))
 
 (copilot-on-request
  'window/showMessageRequest
  (lambda (msg)
    (copilot--dbind (type message actions) msg
-     (if (and actions (vectorp actions) (> (length actions) 0))
-         (let* ((titles (mapcar (lambda (a) (plist-get a :title))
-                                (append actions nil)))
-                (chosen (completing-read
-                         (format "Copilot (%s): "
-                                 (pcase type (1 "Error") (2 "Warning")
-                                        (3 "Info") (_ "Log")))
-                         titles nil t)))
-           (list :title chosen))
-       (copilot--log (pcase type (1 'error) (2 'warning) (_ 'info))
-                     "%s" message)
-       :json-null))))
+                   (if (and actions (vectorp actions) (> (length actions) 0))
+                       (let* ((titles (mapcar (lambda (a) (plist-get a :title))
+                                              (append actions nil)))
+                              (chosen (completing-read
+                                       (format "Copilot (%s): "
+                                               (pcase type (1 "Error") (2 "Warning")
+                                                      (3 "Info") (_ "Log")))
+                                       titles nil t)))
+                         (list :title chosen))
+                     (copilot--log (pcase type (1 'error) (2 'warning) (_ 'info))
+                                   "%s" message)
+                     :json-null))))
 
 (copilot-on-request
  'window/showDocument
  (lambda (msg)
    (condition-case _err
        (copilot--dbind (uri external takeFocus) msg
-         (let ((focus (not (eq takeFocus :json-false))))
-           (cond
-            ((or (eq external t) (string-match-p "\\`https?://" uri))
-             (browse-url uri))
-            ((string-prefix-p "file://" uri)
-             (let* ((path (url-unhex-string
-                           (string-remove-prefix "file://" uri)))
-                    (buf (find-file-noselect path)))
-               (if focus
-                   (find-file path)
-                 (display-buffer buf)))))
-           (list :success t)))
+                       (let ((focus (not (eq takeFocus :json-false))))
+                         (cond
+                          ((or (eq external t) (string-match-p "\\`https?://" uri))
+                           (browse-url uri))
+                          ((string-prefix-p "file://" uri)
+                           (let* ((path (url-unhex-string
+                                         (string-remove-prefix "file://" uri)))
+                                  (buf (find-file-noselect path)))
+                             (if focus
+                                 (find-file path)
+                               (display-buffer buf)))))
+                         (list :success t)))
      (error (list :success :json-false)))))
 
 (copilot-on-notification
  '$/progress
  (lambda (msg)
    (copilot--dbind (token value) msg
-     (let ((kind (plist-get value :kind)))
-       (cond
-        ((equal kind "begin")
-         (puthash token
-                  (list :title (plist-get value :title)
-                        :message (plist-get value :message)
-                        :percentage (plist-get value :percentage))
-                  copilot--progress-sessions))
-        ((equal kind "report")
-         (let ((session (gethash token copilot--progress-sessions)))
-           (when session
-             (when (plist-member value :message)
-               (plist-put session :message (plist-get value :message)))
-             (when (plist-member value :percentage)
-               (plist-put session :percentage (plist-get value :percentage))))))
-        ((equal kind "end")
-         (remhash token copilot--progress-sessions)))
-       (force-mode-line-update t)))))
+                   (let ((kind (plist-get value :kind)))
+                     (cond
+                      ((equal kind "begin")
+                       (puthash token
+                                (list :title (plist-get value :title)
+                                      :message (plist-get value :message)
+                                      :percentage (plist-get value :percentage))
+                                copilot--progress-sessions))
+                      ((equal kind "report")
+                       (let ((session (gethash token copilot--progress-sessions)))
+                         (when session
+                           (when (plist-member value :message)
+                             (plist-put session :message (plist-get value :message)))
+                           (when (plist-member value :percentage)
+                             (plist-put session :percentage (plist-get value :percentage))))))
+                      ((equal kind "end")
+                       (remhash token copilot--progress-sessions)))
+                     (force-mode-line-update t)))))
 
 (defun copilot--get-panel-completions (callback)
   "Get panel completions with CALLBACK via llm-ls/getCompletions."
@@ -1423,35 +1423,35 @@ Uppercase CHAR disables `case-fold-search', mirroring `zap-to-char'."
   "Show COMPLETION-DATA."
   (when (copilot--satisfy-display-predicates)
     (copilot--dbind
-        (((:insertText insert-text)) command range)
-        completion-data
-      (save-excursion
-        (save-restriction
-          (widen)
-          (let* ((p (point))
-                 (full-insert-text insert-text)
-                 (line (map-nested-elt range '(:start :line)))
-                 (start-char (map-nested-elt range '(:start :character)))
-                 (end-char (map-nested-elt range '(:end :character)))
-                 (goto-line! (lambda ()
-                               (goto-char (point-min))
-                               (forward-line (1- (+ line copilot--line-bias)))))
-                 (start (progn
-                          (funcall goto-line!)
-                          (copilot--goto-utf16-offset start-char)
-                          (let* ((cur-line (buffer-substring-no-properties (point) (line-end-position)))
-                                 (common-prefix-len (length (copilot--string-common-prefix insert-text cur-line))))
-                            (setq insert-text (substring insert-text common-prefix-len))
-                            (forward-char common-prefix-len)
-                            (point))))
-                 (end (progn
-                        (funcall goto-line!)
-                        (copilot--goto-utf16-offset end-char)
-                        (point)))
-                 (fixed-completion (copilot-balancer-fix-completion start end insert-text)))
-            (goto-char p)
-            (pcase-let ((`(,start ,end ,balanced-text) fixed-completion))
-              (copilot--display-overlay-completion balanced-text command full-insert-text start end))))))))
+     (((:insertText insert-text)) command range)
+     completion-data
+     (save-excursion
+       (save-restriction
+         (widen)
+         (let* ((p (point))
+                (full-insert-text insert-text)
+                (line (map-nested-elt range '(:start :line)))
+                (start-char (map-nested-elt range '(:start :character)))
+                (end-char (map-nested-elt range '(:end :character)))
+                (goto-line! (lambda ()
+                              (goto-char (point-min))
+                              (forward-line (1- (+ line copilot--line-bias)))))
+                (start (progn
+                         (funcall goto-line!)
+                         (copilot--goto-utf16-offset start-char)
+                         (let* ((cur-line (buffer-substring-no-properties (point) (line-end-position)))
+                                (common-prefix-len (length (copilot--string-common-prefix insert-text cur-line))))
+                           (setq insert-text (substring insert-text common-prefix-len))
+                           (forward-char common-prefix-len)
+                           (point))))
+                (end (progn
+                       (funcall goto-line!)
+                       (copilot--goto-utf16-offset end-char)
+                       (point)))
+                (fixed-completion (copilot-balancer-fix-completion start end insert-text)))
+           (goto-char p)
+           (pcase-let ((`(,start ,end ,balanced-text) fixed-completion))
+             (copilot--display-overlay-completion balanced-text command full-insert-text start end))))))))
 
 (defun copilot--ensure-doc-open ()
   "Ensure the current buffer has been opened with the Copilot server.
