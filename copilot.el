@@ -65,6 +65,13 @@ Disable idle completion if set to nil."
   :group 'copilot
   :package-version '(copilot . "0.1"))
 
+(defcustom copilot-completion-timeout 30
+  "Timeout in seconds for completion requests.
+Cloud models like Gemini may need a longer timeout."
+  :type 'number
+  :group 'copilot
+  :package-version '(copilot . "0.5"))
+
 (defcustom copilot-network-proxy nil
   "Network proxy to use for Copilot.
 
@@ -1039,6 +1046,7 @@ TRIGGER-KIND is 1 for invoked, 2 for automatic (default)."
         (copilot--async-request 'llm-ls/getCompletions
                                 (copilot--inline-completion-params (or trigger-kind 2))
                                 :success-fn callback
+                                :timeout copilot-completion-timeout
                                 :error-fn (lambda (err)
                                             (unless (= (plist-get err :code) -32800) ; Request canceled
                                               (copilot--log 'error "llm-ls/getCompletions failed: %S"
@@ -1192,6 +1200,7 @@ Each request METHOD can have only one HANDLER."
   (copilot--async-request 'llm-ls/getCompletions
                           (copilot--inline-completion-params 1)
                           :success-fn callback
+                          :timeout copilot-completion-timeout
                           :timeout-fn (lambda ()
                                         (copilot--log 'warning "Copilot server timeout."))))
 
